@@ -9,15 +9,27 @@ type String interface {
 	String() string
 }
 
-type Mapper func(string) fmt.Stringer
+type Mapper func(Cx) fmt.Stringer
+type Cx struct {
+	Chs  string
+	Body string
+}
 
 type MapperNode struct {
-	Chars    string
-	Fn       Mapper
-	Children []*MapperNode
+	Chars                 string
+	Fn                    Mapper
+	Children              []*MapperNode
+	maxLenOfCharsThisPath int
 }
 
 func (n *MapperNode) Insert(chs string, fn Mapper) {
+	n._insert(chs, fn, len(chs))
+}
+
+func (n *MapperNode) _insert(chs string, fn Mapper, originalLenOfChars int) {
+	if n.maxLenOfCharsThisPath < originalLenOfChars {
+		n.maxLenOfCharsThisPath = originalLenOfChars
+	}
 	if len(chs) == 0 {
 		n.Fn = fn
 		return
@@ -28,16 +40,27 @@ func (n *MapperNode) Insert(chs string, fn Mapper) {
 
 	for _, child := range n.Children {
 		if child.Chars == ch {
-			child.Insert(chs, fn)
+			child.maxLenOfCharsThisPath = originalLenOfChars
+			child._insert(chs, fn, originalLenOfChars)
 			return
 		}
 	}
 
 	child := &MapperNode{
-		Chars: ch,
+		Chars:                 ch,
+		maxLenOfCharsThisPath: originalLenOfChars,
 	}
-	child.Insert(chs, fn)
+	child._insert(chs, fn, originalLenOfChars)
 	n.Children = append(n.Children, child)
+
+}
+
+func (n *MapperNode) isWordOfLenPossible(len int) bool {
+	if n.maxLenOfCharsThisPath == 0 {
+		return false
+	}
+
+	return len <= n.maxLenOfCharsThisPath
 }
 
 func (n *MapperNode) Find(chs string) Mapper {
@@ -77,7 +100,41 @@ func (p *Parser) MapFirst(chs string, fn Mapper) {
 }
 
 func (p *Parser) MapCaptures(chs string, fn Mapper) {
-	p.captures.Insert(chs, fn)
+	chsToInsert := strings.Split(chs, "")
+	for i := range chsToInsert {
+		if i < len(chsToInsert)-1 {
+			// If we already have a mapper for the current character, we do not
+			// override it. This is to prevent the following scenario:
+			// We have a mapper for "*" and "**". If we now try to insert a mapper
+			// for "***", we do not want to override the mapper for "**" with the
+			// noOpMapper. To prevent this we first check if there is already a
+			// mapper for the current characters. If there is, we do not override it.
+			if p.captures.Find(chs[0:i+1]) != nil {
+				continue
+			}
+			// If we do not have a mapper for the current character, we insert a
+			// noOpMapper. This is important since in the parser we check if we find a mapper
+			// For a single character first before starting to add more characters to the
+			// string we use for searching. So we need the full path of the string to be present
+			// in the tree, but of course if it is not complete yet, we do not want to insert the
+			// actual mapper.
+			p.captures.Insert(chs[0:i+1], Mapper(noOpMapper))
+		} else {
+			p.captures.Insert(chs, fn)
+		}
+	}
+}
+
+func noOpMapper(cx Cx) fmt.Stringer {
+	return noOp{body: cx.Chs + cx.Body + cx.Chs}
+}
+
+type noOp struct {
+	body string
+}
+
+func (n noOp) String() string {
+	return n.body
 }
 
 func (p Parser) Parse() []string {
@@ -99,25 +156,33 @@ func (p Parser) parseLine(line string) string {
 	tmp := ""
 	lastValidMapper := Mapper(nil)
 	var lastValidMapperIdx int
-	// Iterating over each character in the line
-	// as long as we find a valid mapper, we replace the old one
+	// Iterating over each character in the line.
+	// As long as we find a valid mapper, we replace the old one
 	// with the new one. If we don't find a valid mapper, we
-	// break out of the loop and use the last valid mapper
+	// check if it is possible to find another mapper further down.
+	// If not, we break out of the loop and use the last valid mapper
 	// to parse the rest of the line.
 	for i, ch := range line {
 		chs += string(ch)
-		fmt.Println("Chs", chs)
 		if fn := p.mappers.Find(chs); fn != nil {
 			lastValidMapper = fn
 			lastValidMapperIdx = i
 		} else {
 			if lastValidMapper != nil {
-				tmp = lastValidMapper(strings.TrimSpace(line[lastValidMapperIdx+1:])).String()
+				tmp = lastValidMapper(Cx{
+					Chs:  line[0:lastValidMapperIdx],
+					Body: strings.TrimSpace(line[lastValidMapperIdx+1:]),
+				}).String()
 				lastValidMapper = nil
+			}
+			if !p.mappers.isWordOfLenPossible(len(chs)) {
+				break
 			}
 		}
 	}
 
+	// If we didnt find any mapper and therefore the tmp variable is empty,
+	// we just leave the line as is.
 	if tmp != "" {
 		line = tmp
 	}
@@ -134,6 +199,10 @@ func (p Parser) parseLine(line string) string {
 		if p.captures.Find(string(ch)) != nil {
 			chs += string(ch)
 		} else {
+			// If we do not find a capture mapper for the current character,
+			// we take the characters that previously matched a capture mapper
+			// and remember them as the starting pattern in order to compare it
+			// with the closing pattern.
 			if chs != "" {
 				startingPattern = chs
 			}
@@ -144,7 +213,10 @@ func (p Parser) parseLine(line string) string {
 			mapper = fn
 
 			if startingPattern == chs {
-				results = append(results, mapper(string(capture)).String())
+				results = append(results, mapper(Cx{
+					Chs:  startingPattern,
+					Body: string(capture),
+				}).String())
 				startingPattern = ""
 				mapper = nil
 				inCapture = false
@@ -161,7 +233,10 @@ func (p Parser) parseLine(line string) string {
 					capture = ""
 					chs = ""
 				} else {
-					results = append(results, mapper(string(capture)).String())
+					results = append(results, mapper(Cx{
+						Chs:  startingPattern,
+						Body: string(capture),
+					}).String())
 					mapper = nil
 					inCapture = false
 					capture = ""
@@ -175,6 +250,13 @@ func (p Parser) parseLine(line string) string {
 		} else {
 			results = append(results, string(ch))
 		}
+	}
+
+	if startingPattern != "" {
+		results = append(results, noOpMapper(Cx{
+			Chs:  "",
+			Body: startingPattern + (capture),
+		}).String())
 	}
 
 	return strings.Join(results, "")

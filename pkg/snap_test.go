@@ -10,23 +10,25 @@ func TestMap(t *testing.T) {
 ## Hello World
 Hello There ... *General Kenobi*.. what a pleasant surprise **to see you here**
 #### Hello World
+Hello there * General Kenobi
   `
 	p := NewParser(s)
-	p.MapFirst("#", func(s string) fmt.Stringer {
-		return Heading{Body: s, level: 1}
+	p.MapFirst("#", func(cx Cx) fmt.Stringer {
+		return Heading{Body: cx.Body, level: 1}
 	})
-	p.MapFirst("##", func(s string) fmt.Stringer {
-		return Heading{Body: s, level: 2}
+	p.MapFirst("##", func(cx Cx) fmt.Stringer {
+		return Heading{Body: cx.Body, level: 2}
 	})
-	p.MapFirst("####", func(s string) fmt.Stringer {
-		return Heading{Body: s, level: 4}
+	p.MapFirst("####", func(cx Cx) fmt.Stringer {
+		return Heading{Body: cx.Body, level: 4}
 	})
-	p.MapCaptures("*", func(s string) fmt.Stringer {
-		return Italic{Body: s}
+	p.MapCaptures("*", func(cx Cx) fmt.Stringer {
+		return Italic{Body: cx.Body}
 	})
-	p.MapCaptures("**", func(s string) fmt.Stringer {
-		return Bold{Body: s}
+	p.MapCaptures("**", func(cx Cx) fmt.Stringer {
+		return Bold{Body: cx.Body}
 	})
+	fmt.Println("Mapper ::", p.captures.Find("*"))
 	results := p.Parse()
 
 	t.Log(results)
