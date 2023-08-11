@@ -2,6 +2,7 @@ package snap
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -13,27 +14,39 @@ Hello There ... *General Kenobi*.. what a pleasant surprise **to see you here**
 Hello there * General Kenobi
   `
 	p := NewParser(s)
-	p.MapFirst("#", func(cx Cx) fmt.Stringer {
+	p.MapLinePrefix("#", func(cx Cx) fmt.Stringer {
 		return Heading{Body: cx.Body, level: 1}
 	})
-	p.MapFirst("##", func(cx Cx) fmt.Stringer {
+	p.MapLinePrefix("##", func(cx Cx) fmt.Stringer {
 		return Heading{Body: cx.Body, level: 2}
 	})
-	p.MapFirst("####", func(cx Cx) fmt.Stringer {
+	p.MapLinePrefix("####", func(cx Cx) fmt.Stringer {
 		return Heading{Body: cx.Body, level: 4}
 	})
-	p.MapCaptures("*", func(cx Cx) fmt.Stringer {
+	p.MapCapture("*", func(cx Cx) fmt.Stringer {
 		return Italic{Body: cx.Body}
 	})
-	p.MapCaptures("**", func(cx Cx) fmt.Stringer {
+	p.MapCapture("**", func(cx Cx) fmt.Stringer {
 		return Bold{Body: cx.Body}
 	})
 	fmt.Println("Mapper ::", p.captures.Find("*"))
-	results := p.Parse()
+	results := p.ParseLines()
 
 	t.Log(results)
-	t.Log(p.Lines)
-	if len(results) != 1 {
-		t.Errorf("Expected 1 result, got %d", len(results))
-	}
+	t.Log(strings.Split(p.text, "\n"))
+}
+
+func TestParseImpl(t *testing.T) {
+	s := `**Hello |ok whatever| World**`
+	p := NewParser(s)
+	p.MapCapture("**", func(cx Cx) fmt.Stringer {
+		return Bold{Body: cx.Body}
+	})
+	p.MapCapture("|", func(cx Cx) fmt.Stringer {
+		return Italic{Body: cx.Body}
+	})
+
+	results := p.Parse()
+	t.Log("Results", results)
+	t.Error("Not implemented")
 }

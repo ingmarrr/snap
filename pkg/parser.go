@@ -5,101 +5,37 @@ import (
 	"strings"
 )
 
-type String interface {
-	String() string
-}
-
-type Mapper func(Cx) fmt.Stringer
-type Cx struct {
-	Chs  string
-	Body string
-}
-
-type MapperNode struct {
-	Chars                 string
-	Fn                    Mapper
-	Children              []*MapperNode
-	maxLenOfCharsThisPath int
-}
-
-func (n *MapperNode) Insert(chs string, fn Mapper) {
-	n._insert(chs, fn, len(chs))
-}
-
-func (n *MapperNode) _insert(chs string, fn Mapper, originalLenOfChars int) {
-	if n.maxLenOfCharsThisPath < originalLenOfChars {
-		n.maxLenOfCharsThisPath = originalLenOfChars
-	}
-	if len(chs) == 0 {
-		n.Fn = fn
-		return
-	}
-
-	ch := chs[0:1]
-	chs = chs[1:]
-
-	for _, child := range n.Children {
-		if child.Chars == ch {
-			child.maxLenOfCharsThisPath = originalLenOfChars
-			child._insert(chs, fn, originalLenOfChars)
-			return
-		}
-	}
-
-	child := &MapperNode{
-		Chars:                 ch,
-		maxLenOfCharsThisPath: originalLenOfChars,
-	}
-	child._insert(chs, fn, originalLenOfChars)
-	n.Children = append(n.Children, child)
-
-}
-
-func (n *MapperNode) isWordOfLenPossible(len int) bool {
-	if n.maxLenOfCharsThisPath == 0 {
-		return false
-	}
-
-	return len <= n.maxLenOfCharsThisPath
-}
-
-func (n *MapperNode) Find(chs string) Mapper {
-	if len(chs) == 0 {
-		return n.Fn
-	}
-
-	ch := chs[0:1]
-	chs = chs[1:]
-
-	for _, child := range n.Children {
-		if child.Chars == ch {
-			return child.Find(chs)
-		}
-	}
-
-	return nil
-}
-
 type Parser struct {
-	Lines    []string
-	mappers  *MapperNode
-	captures *MapperNode
+	text         string
+	linePrefixes *MapperNode
+	wordPrefixes *MapperNode
+	mappers      *MapperNode
+	captures     *MapperNode
 }
 
 func NewParser(s string) Parser {
-	lines := strings.Split(s, "\n")
 	return Parser{
-		Lines:    lines,
-		mappers:  &MapperNode{},
-		captures: &MapperNode{},
+		text:         s,
+		linePrefixes: &MapperNode{},
+		wordPrefixes: &MapperNode{},
+		mappers:      &MapperNode{},
+		captures:     &MapperNode{},
 	}
 }
 
-func (p *Parser) MapFirst(chs string, fn Mapper) {
+func (p *Parser) Map(chs string, fn Mapper) {
 	p.mappers.Insert(chs, fn)
 }
 
-func (p *Parser) MapCaptures(chs string, fn Mapper) {
+func (p *Parser) MapLinePrefix(chs string, fn Mapper) {
+	p.linePrefixes.Insert(chs, fn)
+}
+
+func (p *Parser) MapWordPrefix(chs string, fn Mapper) {
+	p.wordPrefixes.Insert(chs, fn)
+}
+
+func (p *Parser) MapCapture(chs string, fn Mapper) {
 	chsToInsert := strings.Split(chs, "")
 	for i := range chsToInsert {
 		if i < len(chsToInsert)-1 {
@@ -137,12 +73,46 @@ func (n noOp) String() string {
 	return n.body
 }
 
-func (p Parser) Parse() []string {
+func (p Parser) Parse() string {
+	rt := p.parse(newParseCx("", p.text, noOpMapper))
+	return rt.parsed
+}
+
+func (p Parser) ParseLines() string {
 	var results []string
-	for _, line := range p.Lines {
+	for _, line := range strings.Split(p.text, "\n") {
 		results = append(results, p.parseLine(line))
 	}
-	return results
+	return strings.Join(results, "\n")
+}
+
+// ParseBlocks parses the text block by block. A block is simply text
+// separated by two newlines. This is useful for parsing markdown
+// since markdown uses two newlines to separate blocks.
+//
+// Example:
+//
+// 1 - # The Clone Wars
+//
+// 2 - ...
+//
+// 3 - Hello There ... *General Kenobi*.. what a pleasant surprise **to see you here**
+//
+// 4 - ...
+//
+// 5 - ## The Reupublic
+func (p Parser) ParseBlocks() string {
+	blocks := strings.Split(p.text, "\n\n")
+	var lines []string
+	for _, block := range blocks {
+		lines = append(lines, strings.Join(strings.Split(block, "\n"), ""))
+	}
+	var results []string
+	for _, line := range lines {
+		results = append(results, p.parseLine(line))
+	}
+
+	return strings.Join(results, "\n")
 }
 
 func (p Parser) parseLine(line string) string {
@@ -164,7 +134,7 @@ func (p Parser) parseLine(line string) string {
 	// to parse the rest of the line.
 	for i, ch := range line {
 		chs += string(ch)
-		if fn := p.mappers.Find(chs); fn != nil {
+		if fn := p.linePrefixes.Find(chs); fn != nil {
 			lastValidMapper = fn
 			lastValidMapperIdx = i
 		} else {
@@ -175,7 +145,7 @@ func (p Parser) parseLine(line string) string {
 				}).String()
 				lastValidMapper = nil
 			}
-			if !p.mappers.isWordOfLenPossible(len(chs)) {
+			if !p.linePrefixes.isWordOfLenPossible(len(chs)) {
 				break
 			}
 		}
@@ -186,7 +156,7 @@ func (p Parser) parseLine(line string) string {
 	if tmp != "" {
 		line = tmp
 	}
-	fmt.Println("line", line)
+	// fmt.Println("line", line)
 
 	var mapper Mapper
 	inCapture := false
@@ -260,4 +230,214 @@ func (p Parser) parseLine(line string) string {
 	}
 
 	return strings.Join(results, "")
+}
+
+type ParseCx struct {
+	chs    string
+	buf    string
+	rest   string
+	mapper Mapper
+}
+
+func newParseCx(chs string, rest string, mapper Mapper) ParseCx {
+	return ParseCx{
+		chs:    chs,
+		buf:    "",
+		rest:   rest,
+		mapper: mapper,
+	}
+}
+
+func (p *Parser) parse(cx ParseCx) Rt {
+	currChs := ""
+	var mapper Mapper
+	var nextChs string
+
+	for {
+		if len(cx.rest) == 0 {
+			return Rt{
+				parsed: "",
+				rest:   "",
+			}
+		}
+
+		ch := cx.rest[0:1]
+		currChs += ch
+
+		conOrIs := containsOrIs(cx.chs, currChs)
+
+		if conOrIs.contains {
+			if conOrIs.is {
+				cx.rest = cx.rest[len(cx.chs):]
+				return Rt{
+					parsed: cx.mapper(Cx{
+						Chs:  cx.chs,
+						Body: cx.buf,
+					}).String(),
+					rest: cx.rest,
+				}
+			} else {
+				continue
+			}
+		}
+
+		if fn := p.ifFn(currChs); fn != nil {
+			mapper = fn
+			cx.rest = cx.rest[1:]
+			nextChs = currChs
+			continue
+		}
+
+		if mapper != nil {
+			rt := p.parse(newParseCx(nextChs, cx.rest, mapper))
+			cx.buf += rt.parsed
+			cx.rest = rt.rest
+			currChs = ""
+			nextChs = ""
+		}
+
+		if len(cx.rest) != 0 {
+			cx.buf += string(currChs)
+			cx.rest = cx.rest[1:]
+			currChs = ""
+			continue
+		}
+
+		return Rt{
+			parsed: cx.mapper(Cx{
+				Chs:  cx.chs,
+				Body: cx.buf,
+			}).String(),
+			rest: cx.rest,
+		}
+	}
+}
+
+func (p *Parser) ifFn(chs string) Mapper {
+	if fn := p.linePrefixes.Find(chs); fn != nil {
+		return fn
+	}
+	if fn := p.wordPrefixes.Find(chs); fn != nil {
+		return fn
+	}
+	if fn := p.mappers.Find(chs); fn != nil {
+		return fn
+	}
+	if fn := p.captures.Find(chs); fn != nil {
+		return fn
+	}
+	return nil
+}
+
+func (p *Parser) parseCapture(chs string, s string, fn Mapper) Rt {
+	closingChs := ""
+	buf := ""
+	rest := ""
+	for i, ch := range s {
+		closingChs += string(ch)
+		cOrIs := containsOrIs(chs, closingChs)
+		if cOrIs.contains {
+			if cOrIs.is {
+				rest = s[i+1:]
+				break
+			} else {
+				continue
+			}
+		}
+
+		buf += string(ch)
+		closingChs = ""
+	}
+
+	return Rt{
+		parsed: fn(Cx{
+			Chs:  chs,
+			Body: buf,
+		}).String(),
+		rest: rest,
+	}
+}
+
+func containsOrIs(chs string, chsToCheck string) ConOrIs {
+	lnTC := len(chsToCheck)
+	lnCh := len(chs)
+
+	if lnTC == 0 || lnCh == 0 {
+		return ConOrIs{
+			contains: false,
+			is:       false,
+		}
+	}
+
+	if lnTC > lnCh {
+		return ConOrIs{
+			contains: false,
+			is:       false,
+		}
+	}
+
+	if chs[0:lnTC] == chsToCheck {
+		if lnTC == lnCh {
+			return ConOrIs{
+				contains: true,
+				is:       true,
+			}
+		} else {
+			return ConOrIs{
+				contains: true,
+				is:       false,
+			}
+		}
+	}
+
+	return ConOrIs{
+		contains: false,
+		is:       false,
+	}
+}
+
+func parseLinePrefix(prefix string, s string, fn Mapper) Rt {
+	buf := ""
+	rest := ""
+	for i, ch := range s {
+		if ch == '\n' {
+			buf += string(ch)
+			rest = s[i+1:]
+		}
+	}
+	return Rt{
+		parsed: fn(Cx{
+			Chs:  prefix,
+			Body: buf,
+		}).String(),
+		rest: rest,
+	}
+}
+
+func parseWordPrefix(prefix string, s string, fn Mapper) Rt {
+	buf := ""
+	rest := ""
+	for i, ch := range s {
+		if ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r' {
+			buf += string(ch)
+			rest = s[i+1:]
+		}
+	}
+	return Rt{
+		parsed: fn(Cx{
+			Chs:  prefix,
+			Body: buf,
+		}).String(),
+		rest: rest,
+	}
+}
+
+type Rt struct {
+	parsed string
+	rest   string
+}
+
+type ConOrIs struct {
+	contains bool
+	is       bool
 }
