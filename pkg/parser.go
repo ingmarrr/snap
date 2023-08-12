@@ -281,15 +281,14 @@ func (p *Parser) parse(cx ParseCx) Rt {
 			}
 		}
 
-		if fn := p.ifFn(currChs); fn != nil {
-			mapper = fn
+		if mCx := p.ifFn(currChs); mCx.Type != Undefined {
+			mapper = mCx.Mapper
 			cx.rest = cx.rest[1:]
 			nextChs = currChs
 			continue
 		}
 
 		if mapper != nil {
-			fmt.Println("mapper", mapper)
 			rt := p.parse(newParseCx(nextChs, cx.rest, mapper))
 			cx.buf += rt.parsed
 			cx.rest = rt.rest
@@ -316,20 +315,30 @@ func (p *Parser) parse(cx ParseCx) Rt {
 	}
 }
 
-func (p *Parser) ifFn(chs string) Mapper {
-	// if fn := p.linePrefixes.Find(chs); fn != nil {
-	// 	return fn
-	// }
-	// if fn := p.wordPrefixes.Find(chs); fn != nil {
-	// 	return fn
-	// }
-	// if fn := p.mappers.Find(chs); fn != nil {
-	// 	return fn
-	// }
-	if fn := p.captures.Find(chs); fn != nil {
-		return fn
+func (p *Parser) ifFn(chs string) MapperCx {
+	var ty MapperType = Undefined
+	var mapper Mapper = noOpMapper
+	if fn := p.linePrefixes.Find(chs); fn != nil {
+		ty = LinePrefix
+		mapper = fn
 	}
-	return nil
+	if fn := p.wordPrefixes.Find(chs); fn != nil {
+		ty = WordPrefix
+		mapper = fn
+	}
+	if fn := p.mappers.Find(chs); fn != nil {
+		ty = Map
+		mapper = fn
+	}
+	if fn := p.captures.Find(chs); fn != nil {
+		ty = Capture
+		mapper = fn
+	}
+	return MapperCx{
+		Chs:    chs,
+		Mapper: mapper,
+		Type:   ty,
+	}
 }
 
 func (p *Parser) parseCapture(chs string, s string, fn Mapper) Rt {

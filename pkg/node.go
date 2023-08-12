@@ -6,7 +6,23 @@ type Cx struct {
 	Chs  string
 	Body string
 }
+type MapperCx struct {
+	Chs    string
+	Mapper Mapper
+	Type   MapperType
+}
+
 type Mapper func(Cx) fmt.Stringer
+
+type MapperType int
+
+const (
+	Map MapperType = iota
+	WordPrefix
+	LinePrefix
+	Capture
+	Undefined
+)
 
 type MapperNode struct {
 	Chars                 string
