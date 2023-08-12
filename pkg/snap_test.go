@@ -36,10 +36,13 @@ Hello there * General Kenobi
 }
 
 func TestParseImpl(t *testing.T) {
-	s := `**Hello |ok whatever| World**
-# Hello there`
+	s := `**Hello World** 
+##Hello World
+# Hello *there* what is up
+@navbarComponent`
+
 	p := NewParser(s)
-	p.MapCapture("|", func(cx Cx) fmt.Stringer {
+	p.MapCapture("*", func(cx Cx) fmt.Stringer {
 		return Italic{Body: cx.Body}
 	})
 	p.MapCapture("**", func(cx Cx) fmt.Stringer {
@@ -48,8 +51,11 @@ func TestParseImpl(t *testing.T) {
 	p.MapLinePrefix("#", func(cx Cx) fmt.Stringer {
 		return Heading{Body: cx.Body, level: 1}
 	})
-	p.MapLinePrefix("##", func(cx Cx) fmt.Stringer {
+	p.MapWordPrefix("##", func(cx Cx) fmt.Stringer {
 		return Heading{Body: cx.Body, level: 2}
+	})
+	p.MapWordPrefix("@", func(cx Cx) fmt.Stringer {
+		return NavbarComponent{Body: cx.Body}
 	})
 
 	results := p.Parse()

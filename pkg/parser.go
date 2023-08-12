@@ -82,21 +82,6 @@ func (p Parser) ParseLines() string {
 	return strings.Join(results, "\n")
 }
 
-// ParseBlocks parses the text block by block. A block is simply text
-// separated by two newlines. This is useful for parsing markdown
-// since markdown uses two newlines to separate blocks.
-//
-// Example:
-//
-// 1 - # The Clone Wars
-//
-// 2 - ...
-//
-// 3 - Hello There ... *General Kenobi*.. what a pleasant surprise **to see you here**
-//
-// 4 - ...
-//
-// 5 - ## The Reupublic
 func (p Parser) ParseBlocks() string {
 	blocks := strings.Split(p.text, "\n\n")
 	var lines []string
@@ -235,37 +220,58 @@ func (p *Parser) parse(cx ParseCx) Rt {
 
 	for {
 		if len(cx.rest) == 0 {
+			// Reached the end of the string. The only case where we want to return
+			// the original string is if we are in a capture mapper. This is because
+			// since we reached the end of the string without early exit, that means
+			// that we did not find a matching closing character. Therefore we want to
+			// return the original string and apply the `noOpMapper` to it.
+			if cx.ty == Capture {
+				return Rt{
+					parsed: noOpMapper(Cx{
+						Chs:  "",
+						Body: cx.buf + cx.chs,
+					}).String(),
+					rest: cx.rest,
+				}
+			}
+			// If we are not in a capture mapper, we want to return the parsed string
+			// and the rest of the string, since for any other mapper we do not require
+			// a matching closing character. [linePrefixes, wordPrefixes, mappers]
+			res := cx.mapper(Cx{
+				Chs:  cx.chs,
+				Body: cx.buf,
+			}).String()
+
 			return Rt{
-				parsed: "",
-				rest:   "",
+				parsed: res,
+				rest:   cx.rest,
 			}
 		}
 
 		ch := cx.rest[0:1]
 		currChs += ch
 
-		// continueOrEnd := cx.checker(cx.chs, currChs)
-		// if continueOrEnd.continueSearching {
-		//   continue
-		// }
-		// if continueOrEnd.endParsing {
-		//   cx.rest = cx.rest[len(cx.chs):]
-		//   return Rt{
-		//     parsed: cx.mapper(Cx{
-		//       Chs:  cx.chs,
-		//       Body: cx.buf,
-		//     }).String(),
-		//     rest: cx.rest,
-		//   }
-		// }
-
 		check := cx.checker(cx.chs, currChs)
 
+		// If we are in a capture mapper and there is a possibility for a higher
+		// priority mapper to be found, we want to continue searching for a matching
+		// closing character. The longer the postfix of the mapper is, the higher the
+		// priority. Consider the following example:
+		// We have a mapper for "*" and "**". If we are looking for "**", we will always
+		// find a mapper for "*" first. Therefore we want to continue searching for a
+		// matching closing character.
 		if check.continueSearchingForMatchingClosingCharacters {
 			continue
 		}
+
+		// This means that whatever checker we called, be it for a linePrefix, wordPrefix,
+		// mapper or capture, we found a character that terminates that specific
+		// parsing/transpiling. Therefore we want to apply the mapper to the current
+		// string and return the parsed string and the rest of the string.
 		if check.applyParser {
-			cx.rest = cx.rest[len(cx.chs):]
+			if cx.ty == Capture {
+				cx.rest = cx.rest[len(cx.chs):]
+			}
 			return Rt{
 				parsed: cx.mapper(Cx{
 					Chs:  cx.chs,
@@ -275,28 +281,25 @@ func (p *Parser) parse(cx ParseCx) Rt {
 			}
 		}
 
+		// As long as we find a valid mapper, we want to continue searching for a
+		// matching opening character. The longer the prefix of the mapper is, the
+		// higher the priority. Consider the following example:
+		// We have a mapper for "*" and "**". If we are looking for "**", we will always
+		// find a mapper for "*" first. Therefore we want to continue searching for a
+		// matching opening character as long as it is necessary.
 		if fnMCx := p.ifFn(currChs); fnMCx.Type != Undefined {
 			mCx = fnMCx
+			// Advancing by a single character here is important since we want to
+			// check if the next character is a valid mapper.
 			cx.rest = cx.rest[1:]
 			nextChs = currChs
 			continue
 		}
 
+		// If we found a valid mapper, we want to parse the rest of the string recursively.
+		// We do this by calling the parse function again with the rest of the string and
+		// pass in the required information to the recursive call.
 		if mCx.Type != Undefined {
-			// var rt Rt
-			// switch mCx.Type {
-			// case Capture:
-			// 	newCx :=
-			// ParseCx{
-			// 		chs:     nextChs,
-			// 		buf:     "",
-			// 		rest:    cx.rest,
-			// 		mapper:  mCx.Mapper,
-			// 		checker: mCx.Checker,
-			// 		ty:      mCx.Type,
-			// 	}
-			// 	rt = p.parse(newCx)
-			// }
 			rt := p.parse(ParseCx{
 				chs:     nextChs,
 				buf:     "",
@@ -305,8 +308,13 @@ func (p *Parser) parse(cx ParseCx) Rt {
 				checker: mCx.Checker,
 				ty:      mCx.Type,
 			})
+			// We just exited the recursive call and therefore we need to update the
+			// current context with the parsed string and the rest of the string.
 			cx.buf += rt.parsed
 			cx.rest = rt.rest
+
+			// We need to reset the current characters and the next characters
+			// since we just parsed them and we might encounter another recursive call
 			currChs = ""
 			nextChs = ""
 			mCx = NoOpMapperCx()
@@ -314,7 +322,11 @@ func (p *Parser) parse(cx ParseCx) Rt {
 
 		if len(cx.rest) != 0 {
 			cx.buf += string(currChs)
-			cx.rest = cx.rest[1:]
+			// We need to advance the rest of the string by the length of the current
+			// characters since we already checked if the current characters are a valid
+			// mapper. If they are not, we need to advance the rest of the string by the
+			// length of the current characters, which could be very well more than one.
+			cx.rest = cx.rest[len(currChs):]
 			currChs = ""
 			nextChs = cx.chs
 			continue
@@ -400,7 +412,7 @@ func captureEndChecker(chs string, chsToCheck string) ContinueOrEnd {
 	}
 }
 
-func lineEndChecker(chs string, chsToCheck string) ContinueOrEnd {
+func lineEndChecker(_ string, chsToCheck string) ContinueOrEnd {
 	if len(chsToCheck) == 0 {
 		return ContinueOrEnd{
 			continueSearchingForMatchingClosingCharacters: false,
@@ -467,77 +479,5 @@ func noCharacterMatchChecker(chs string, chsToCheck string) ContinueOrEnd {
 	return ContinueOrEnd{
 		continueSearchingForMatchingClosingCharacters: false,
 		applyParser: true,
-	}
-}
-
-func parseLinePrefix(prefix string, s string, fn Mapper) Rt {
-	buf := ""
-	rest := ""
-	foo := func(chs string, chsToCheck string) ContinueOrEnd {
-		return ContinueOrEnd{
-			continueSearchingForMatchingClosingCharacters: false,
-			applyParser: false,
-		}
-	}
-
-	conOrEnd := foo(prefix, s)
-	if conOrEnd.continueSearchingForMatchingClosingCharacters {
-	}
-	if conOrEnd.applyParser {
-	}
-
-	for i, ch := range s {
-		if ch == '\n' {
-			buf += string(ch)
-			rest = s[i+1:]
-		}
-	}
-	return Rt{
-		parsed: fn(Cx{
-			Chs:  prefix,
-			Body: buf,
-		}).String(),
-		rest: rest,
-	}
-}
-
-func parseWordPrefix(prefix string, s string, fn Mapper) Rt {
-	buf := ""
-	rest := ""
-	for i, ch := range s {
-		if ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r' {
-			buf += string(ch)
-			rest = s[i+1:]
-		}
-	}
-	return Rt{
-		parsed: fn(Cx{
-			Chs:  prefix,
-			Body: buf,
-		}).String(),
-		rest: rest,
-	}
-}
-
-func parseWord(chs string, s string, fn Mapper) Rt {
-	buf := ""
-	rest := ""
-	for i, ch := range s {
-		if byte(ch) != chs[i] {
-			return Rt{
-				parsed: "",
-				rest:   s,
-			}
-		} else {
-			buf += string(ch)
-			rest = s[i+1:]
-		}
-	}
-	return Rt{
-		parsed: fn(Cx{
-			Chs:  chs,
-			Body: buf,
-		}).String(),
-		rest: rest,
 	}
 }

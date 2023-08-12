@@ -26,3 +26,16 @@ type Bold struct {
 func (b Bold) String() string {
 	return fmt.Sprintf("<b>%s</b>", b.Body)
 }
+
+type NavbarComponent struct {
+	Body string
+}
+
+func (n NavbarComponent) String() string {
+	return `<nav>
+	<a href="/html/">HTML</a> |
+	<a href="/css/">CSS</a> |
+	<a href="/js/">JavaScript</a> |
+	<a href="/python/">Python</a>
+  </nav>`
+}
