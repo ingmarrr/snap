@@ -289,17 +289,20 @@ func (p *Parser) parse(cx ParseCx) Rt {
 		}
 
 		if mapper != nil {
+			fmt.Println("mapper", mapper)
 			rt := p.parse(newParseCx(nextChs, cx.rest, mapper))
 			cx.buf += rt.parsed
 			cx.rest = rt.rest
 			currChs = ""
 			nextChs = ""
+			mapper = nil
 		}
 
 		if len(cx.rest) != 0 {
 			cx.buf += string(currChs)
 			cx.rest = cx.rest[1:]
 			currChs = ""
+			nextChs = cx.chs
 			continue
 		}
 
@@ -314,15 +317,15 @@ func (p *Parser) parse(cx ParseCx) Rt {
 }
 
 func (p *Parser) ifFn(chs string) Mapper {
-	if fn := p.linePrefixes.Find(chs); fn != nil {
-		return fn
-	}
-	if fn := p.wordPrefixes.Find(chs); fn != nil {
-		return fn
-	}
-	if fn := p.mappers.Find(chs); fn != nil {
-		return fn
-	}
+	// if fn := p.linePrefixes.Find(chs); fn != nil {
+	// 	return fn
+	// }
+	// if fn := p.wordPrefixes.Find(chs); fn != nil {
+	// 	return fn
+	// }
+	// if fn := p.mappers.Find(chs); fn != nil {
+	// 	return fn
+	// }
 	if fn := p.captures.Find(chs); fn != nil {
 		return fn
 	}

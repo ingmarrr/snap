@@ -29,7 +29,6 @@ Hello there * General Kenobi
 	p.MapCapture("**", func(cx Cx) fmt.Stringer {
 		return Bold{Body: cx.Body}
 	})
-	fmt.Println("Mapper ::", p.captures.Find("*"))
 	results := p.ParseLines()
 
 	t.Log(results)
