@@ -36,13 +36,20 @@ Hello there * General Kenobi
 }
 
 func TestParseImpl(t *testing.T) {
-	s := `**Hello |ok whatever| World**`
+	s := `**Hello |ok whatever| World**
+# Hello there`
 	p := NewParser(s)
+	p.MapCapture("|", func(cx Cx) fmt.Stringer {
+		return Italic{Body: cx.Body}
+	})
 	p.MapCapture("**", func(cx Cx) fmt.Stringer {
 		return Bold{Body: cx.Body}
 	})
-	p.MapCapture("|", func(cx Cx) fmt.Stringer {
-		return Italic{Body: cx.Body}
+	p.MapLinePrefix("#", func(cx Cx) fmt.Stringer {
+		return Heading{Body: cx.Body, level: 1}
+	})
+	p.MapLinePrefix("##", func(cx Cx) fmt.Stringer {
+		return Heading{Body: cx.Body, level: 2}
 	})
 
 	results := p.Parse()

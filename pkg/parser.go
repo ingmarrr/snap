@@ -1,7 +1,6 @@
 package snap
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -61,20 +60,17 @@ func (p *Parser) MapCapture(chs string, fn Mapper) {
 	}
 }
 
-func noOpMapper(cx Cx) fmt.Stringer {
-	return noOp{body: cx.Chs + cx.Body + cx.Chs}
-}
-
-type noOp struct {
-	body string
-}
-
-func (n noOp) String() string {
-	return n.body
-}
-
 func (p Parser) Parse() string {
-	rt := p.parse(newParseCx("", p.text, noOpMapper))
+	mCx := NoOpMapperCx()
+	cx := ParseCx{
+		chs:     mCx.Chs,
+		buf:     "",
+		rest:    p.text,
+		mapper:  mCx.Mapper,
+		checker: mCx.Checker,
+		ty:      mCx.Type,
+	}
+	rt := p.parse(cx)
 	return rt.parsed
 }
 
@@ -232,25 +228,9 @@ func (p Parser) parseLine(line string) string {
 	return strings.Join(results, "")
 }
 
-type ParseCx struct {
-	chs    string
-	buf    string
-	rest   string
-	mapper Mapper
-}
-
-func newParseCx(chs string, rest string, mapper Mapper) ParseCx {
-	return ParseCx{
-		chs:    chs,
-		buf:    "",
-		rest:   rest,
-		mapper: mapper,
-	}
-}
-
 func (p *Parser) parse(cx ParseCx) Rt {
 	currChs := ""
-	var mapper Mapper
+	var mCx MapperCx = NoOpMapperCx()
 	var nextChs string
 
 	for {
@@ -264,37 +244,72 @@ func (p *Parser) parse(cx ParseCx) Rt {
 		ch := cx.rest[0:1]
 		currChs += ch
 
-		conOrIs := containsOrIs(cx.chs, currChs)
+		// continueOrEnd := cx.checker(cx.chs, currChs)
+		// if continueOrEnd.continueSearching {
+		//   continue
+		// }
+		// if continueOrEnd.endParsing {
+		//   cx.rest = cx.rest[len(cx.chs):]
+		//   return Rt{
+		//     parsed: cx.mapper(Cx{
+		//       Chs:  cx.chs,
+		//       Body: cx.buf,
+		//     }).String(),
+		//     rest: cx.rest,
+		//   }
+		// }
 
-		if conOrIs.contains {
-			if conOrIs.is {
-				cx.rest = cx.rest[len(cx.chs):]
-				return Rt{
-					parsed: cx.mapper(Cx{
-						Chs:  cx.chs,
-						Body: cx.buf,
-					}).String(),
-					rest: cx.rest,
-				}
-			} else {
-				continue
+		check := cx.checker(cx.chs, currChs)
+
+		if check.continueSearchingForMatchingClosingCharacters {
+			continue
+		}
+		if check.applyParser {
+			cx.rest = cx.rest[len(cx.chs):]
+			return Rt{
+				parsed: cx.mapper(Cx{
+					Chs:  cx.chs,
+					Body: cx.buf,
+				}).String(),
+				rest: cx.rest,
 			}
 		}
 
-		if mCx := p.ifFn(currChs); mCx.Type != Undefined {
-			mapper = mCx.Mapper
+		if fnMCx := p.ifFn(currChs); fnMCx.Type != Undefined {
+			mCx = fnMCx
 			cx.rest = cx.rest[1:]
 			nextChs = currChs
 			continue
 		}
 
-		if mapper != nil {
-			rt := p.parse(newParseCx(nextChs, cx.rest, mapper))
+		if mCx.Type != Undefined {
+			// var rt Rt
+			// switch mCx.Type {
+			// case Capture:
+			// 	newCx :=
+			// ParseCx{
+			// 		chs:     nextChs,
+			// 		buf:     "",
+			// 		rest:    cx.rest,
+			// 		mapper:  mCx.Mapper,
+			// 		checker: mCx.Checker,
+			// 		ty:      mCx.Type,
+			// 	}
+			// 	rt = p.parse(newCx)
+			// }
+			rt := p.parse(ParseCx{
+				chs:     nextChs,
+				buf:     "",
+				rest:    cx.rest,
+				mapper:  mCx.Mapper,
+				checker: mCx.Checker,
+				ty:      mCx.Type,
+			})
 			cx.buf += rt.parsed
 			cx.rest = rt.rest
 			currChs = ""
 			nextChs = ""
-			mapper = nil
+			mCx = NoOpMapperCx()
 		}
 
 		if len(cx.rest) != 0 {
@@ -318,99 +333,159 @@ func (p *Parser) parse(cx ParseCx) Rt {
 func (p *Parser) ifFn(chs string) MapperCx {
 	var ty MapperType = Undefined
 	var mapper Mapper = noOpMapper
+	var checker Checker = noOpChecker
 	if fn := p.linePrefixes.Find(chs); fn != nil {
 		ty = LinePrefix
 		mapper = fn
+		checker = lineEndChecker
 	}
 	if fn := p.wordPrefixes.Find(chs); fn != nil {
 		ty = WordPrefix
 		mapper = fn
+		checker = wordEndChecker
 	}
 	if fn := p.mappers.Find(chs); fn != nil {
 		ty = Map
 		mapper = fn
+		checker = noCharacterMatchChecker
 	}
 	if fn := p.captures.Find(chs); fn != nil {
 		ty = Capture
 		mapper = fn
+		checker = captureEndChecker
 	}
 	return MapperCx{
-		Chs:    chs,
-		Mapper: mapper,
-		Type:   ty,
+		Chs:     chs,
+		Mapper:  mapper,
+		Checker: checker,
+		Type:    ty,
 	}
 }
 
-func (p *Parser) parseCapture(chs string, s string, fn Mapper) Rt {
-	closingChs := ""
-	buf := ""
-	rest := ""
-	for i, ch := range s {
-		closingChs += string(ch)
-		cOrIs := containsOrIs(chs, closingChs)
-		if cOrIs.contains {
-			if cOrIs.is {
-				rest = s[i+1:]
-				break
-			} else {
-				continue
-			}
-		}
-
-		buf += string(ch)
-		closingChs = ""
-	}
-
-	return Rt{
-		parsed: fn(Cx{
-			Chs:  chs,
-			Body: buf,
-		}).String(),
-		rest: rest,
-	}
-}
-
-func containsOrIs(chs string, chsToCheck string) ConOrIs {
+func captureEndChecker(chs string, chsToCheck string) ContinueOrEnd {
 	lnTC := len(chsToCheck)
 	lnCh := len(chs)
 
 	if lnTC == 0 || lnCh == 0 {
-		return ConOrIs{
-			contains: false,
-			is:       false,
+		return ContinueOrEnd{
+			continueSearchingForMatchingClosingCharacters: false,
+			applyParser: false,
 		}
 	}
 
 	if lnTC > lnCh {
-		return ConOrIs{
-			contains: false,
-			is:       false,
+		return ContinueOrEnd{
+			continueSearchingForMatchingClosingCharacters: false,
+			applyParser: false,
 		}
 	}
 
 	if chs[0:lnTC] == chsToCheck {
 		if lnTC == lnCh {
-			return ConOrIs{
-				contains: true,
-				is:       true,
+			return ContinueOrEnd{
+				continueSearchingForMatchingClosingCharacters: false,
+				applyParser: true,
 			}
 		} else {
-			return ConOrIs{
-				contains: true,
-				is:       false,
+			return ContinueOrEnd{
+				continueSearchingForMatchingClosingCharacters: true,
+				applyParser: false,
 			}
 		}
 	}
 
-	return ConOrIs{
-		contains: false,
-		is:       false,
+	return ContinueOrEnd{
+		continueSearchingForMatchingClosingCharacters: false,
+		applyParser: false,
+	}
+}
+
+func lineEndChecker(chs string, chsToCheck string) ContinueOrEnd {
+	if len(chsToCheck) == 0 {
+		return ContinueOrEnd{
+			continueSearchingForMatchingClosingCharacters: false,
+			applyParser: true,
+		}
+	}
+	lastChar := chsToCheck[len(chsToCheck)-1:]
+	if lastChar == "\n" || lastChar == "\r" {
+		return ContinueOrEnd{
+			continueSearchingForMatchingClosingCharacters: false,
+			applyParser: true,
+		}
+	}
+	return ContinueOrEnd{
+		continueSearchingForMatchingClosingCharacters: false,
+		applyParser: false,
+	}
+}
+
+func wordEndChecker(chs string, chsToCheck string) ContinueOrEnd {
+	if len(chsToCheck) == 0 {
+		return ContinueOrEnd{
+			continueSearchingForMatchingClosingCharacters: false,
+			applyParser: true,
+		}
+	}
+	lastChar := chsToCheck[len(chsToCheck)-1:]
+	if lastChar == " " || lastChar == "\n" || lastChar == "\t" || lastChar == "\r" {
+		return ContinueOrEnd{
+			continueSearchingForMatchingClosingCharacters: false,
+			applyParser: true,
+		}
+	}
+	return ContinueOrEnd{
+		continueSearchingForMatchingClosingCharacters: false,
+		applyParser: false,
+	}
+}
+
+func noCharacterMatchChecker(chs string, chsToCheck string) ContinueOrEnd {
+	if len(chsToCheck) == 0 {
+		return ContinueOrEnd{
+			continueSearchingForMatchingClosingCharacters: false,
+			applyParser: false,
+		}
+	}
+
+	if len(chs) != len(chsToCheck) {
+		return ContinueOrEnd{
+			continueSearchingForMatchingClosingCharacters: false,
+			applyParser: false,
+		}
+	}
+
+	for i, ch := range chs {
+		if byte(ch) != chsToCheck[i] {
+			return ContinueOrEnd{
+				continueSearchingForMatchingClosingCharacters: false,
+				applyParser: false,
+			}
+		}
+	}
+
+	return ContinueOrEnd{
+		continueSearchingForMatchingClosingCharacters: false,
+		applyParser: true,
 	}
 }
 
 func parseLinePrefix(prefix string, s string, fn Mapper) Rt {
 	buf := ""
 	rest := ""
+	foo := func(chs string, chsToCheck string) ContinueOrEnd {
+		return ContinueOrEnd{
+			continueSearchingForMatchingClosingCharacters: false,
+			applyParser: false,
+		}
+	}
+
+	conOrEnd := foo(prefix, s)
+	if conOrEnd.continueSearchingForMatchingClosingCharacters {
+	}
+	if conOrEnd.applyParser {
+	}
+
 	for i, ch := range s {
 		if ch == '\n' {
 			buf += string(ch)
@@ -444,12 +519,25 @@ func parseWordPrefix(prefix string, s string, fn Mapper) Rt {
 	}
 }
 
-type Rt struct {
-	parsed string
-	rest   string
-}
-
-type ConOrIs struct {
-	contains bool
-	is       bool
+func parseWord(chs string, s string, fn Mapper) Rt {
+	buf := ""
+	rest := ""
+	for i, ch := range s {
+		if byte(ch) != chs[i] {
+			return Rt{
+				parsed: "",
+				rest:   s,
+			}
+		} else {
+			buf += string(ch)
+			rest = s[i+1:]
+		}
+	}
+	return Rt{
+		parsed: fn(Cx{
+			Chs:  chs,
+			Body: buf,
+		}).String(),
+		rest: rest,
+	}
 }
