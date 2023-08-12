@@ -19,11 +19,6 @@ type (
 		checker Checker
 		ty      MapperType
 	}
-	PCx struct {
-		mcx  MapperCx
-		buf  string
-		rest string
-	}
 )
 
 func NoOpMapperCx() MapperCx {
@@ -32,16 +27,5 @@ func NoOpMapperCx() MapperCx {
 		Mapper:  noOpMapper,
 		Type:    Undefined,
 		Checker: noOpChecker,
-	}
-}
-
-func newParseCx(rest string, mCx MapperCx) ParseCx {
-	return ParseCx{
-		chs:     mCx.Chs,
-		buf:     "",
-		rest:    rest,
-		mapper:  mCx.Mapper,
-		checker: mCx.Checker,
-		ty:      mCx.Type,
 	}
 }
