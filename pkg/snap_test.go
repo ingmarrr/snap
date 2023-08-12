@@ -62,7 +62,7 @@ func testParseImpl(t *testing.T) {
 	t.Error("Not implemented")
 }
 
-func testParseTwoConsecutiveRecusive(t *testing.T) {
+func TestParseTwoConsecutiveRecusive(t *testing.T) {
 	s := `***Hello World***`
 	p := NewParser(s)
 	p.MapCapture("*", func(cx Cx) string {

@@ -137,7 +137,6 @@ func (p Parser) parseLine(line string) string {
 	if tmp != "" {
 		line = tmp
 	}
-	// fmt.Println("line", line)
 
 	var mapper mapper
 	inCapture := false
@@ -229,7 +228,7 @@ func (p *Parser) parse(cx parseCx) rt {
 				return rt{
 					parsed: noOpMapper(Cx{
 						Chs:  "",
-						Body: cx.buf + cx.chs,
+						Body: cx.chs + cx.buf,
 					}),
 					rest: cx.rest,
 				}
@@ -261,6 +260,11 @@ func (p *Parser) parse(cx parseCx) rt {
 		// find a mapper for "*" first. Therefore we want to continue searching for a
 		// matching closing character.
 		if check.continueSearchingForMatchingClosingCharacters {
+			if fnMCx := p.ifFn(currChs); fnMCx.ty != Undefined {
+				mCx = fnMCx
+				nextChs = currChs
+			}
+			cx.rest = cx.rest[1:]
 			continue
 		}
 
@@ -270,7 +274,13 @@ func (p *Parser) parse(cx parseCx) rt {
 		// string and return the parsed string and the rest of the string.
 		if check.applyParser {
 			if cx.ty == Capture {
-				cx.rest = cx.rest[len(cx.chs):]
+				// Case: `***Hello World***`
+				// Will result in: cx.chs == `**` && cx.rest == `*`
+				if len(cx.chs) > len(cx.rest) {
+					cx.rest = ""
+				} else {
+					cx.rest = cx.rest[len(cx.chs):]
+				}
 			}
 			return rt{
 				parsed: cx.mapper(Cx{
