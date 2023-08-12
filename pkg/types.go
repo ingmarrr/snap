@@ -1,14 +1,11 @@
 package snap
 
-import "fmt"
-
-type Mapper func(Cx) fmt.Stringer
-type Checker func(chs string, chsToCheck string) ContinueOrEnd
-type MapperParser func(cx ParseCx) Rt
-type MapperType int
+type mapper func(Cx) string
+type checker func(chs string, chsToCheck string) continueOrEnd
+type mapperType int
 
 const (
-	Map MapperType = iota
+	Map mapperType = iota
 	WordPrefix
 	LinePrefix
 	Capture
@@ -18,11 +15,11 @@ const (
 type noOp struct {
 	body string
 }
-type Rt struct {
+type rt struct {
 	parsed string
 	rest   string
 }
-type ContinueOrEnd struct {
+type continueOrEnd struct {
 	continueSearchingForMatchingClosingCharacters bool
 	applyParser                                   bool
 }
@@ -31,13 +28,22 @@ func (n noOp) String() string {
 	return n.body
 }
 
-func noOpMapper(cx Cx) fmt.Stringer {
-	return noOp{body: cx.Chs + cx.Body + cx.Chs}
+func noOpMapper(cx Cx) string {
+	return noOp{body: cx.Chs + cx.Body + cx.Chs}.String()
 }
 
-func noOpChecker(chs string, chsToCheck string) ContinueOrEnd {
-	return ContinueOrEnd{
+func noOpChecker(chs string, chsToCheck string) continueOrEnd {
+	return continueOrEnd{
 		continueSearchingForMatchingClosingCharacters: false,
 		applyParser: false,
+	}
+}
+
+func noOpMapperCx() mapperCx {
+	return mapperCx{
+		chs:     "",
+		mapper:  noOpMapper,
+		ty:      Undefined,
+		checker: noOpChecker,
 	}
 }

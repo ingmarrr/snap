@@ -5,27 +5,18 @@ type (
 		Chs  string
 		Body string
 	}
-	MapperCx struct {
-		Chs     string
-		Mapper  Mapper
-		Type    MapperType
-		Checker Checker
+	mapperCx struct {
+		chs     string
+		mapper  mapper
+		ty      mapperType
+		checker checker
 	}
-	ParseCx struct {
+	parseCx struct {
 		chs     string
 		buf     string
 		rest    string
-		mapper  Mapper
-		checker Checker
-		ty      MapperType
+		mapper  mapper
+		checker checker
+		ty      mapperType
 	}
 )
-
-func NoOpMapperCx() MapperCx {
-	return MapperCx{
-		Chs:     "",
-		Mapper:  noOpMapper,
-		Type:    Undefined,
-		Checker: noOpChecker,
-	}
-}

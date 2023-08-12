@@ -22,19 +22,19 @@ func NewParser(s string) Parser {
 	}
 }
 
-func (p *Parser) Map(chs string, fn Mapper) {
+func (p *Parser) Map(chs string, fn mapper) {
 	p.mappers.Insert(chs, fn)
 }
 
-func (p *Parser) MapLinePrefix(chs string, fn Mapper) {
+func (p *Parser) MapLinePrefix(chs string, fn mapper) {
 	p.linePrefixes.Insert(chs, fn)
 }
 
-func (p *Parser) MapWordPrefix(chs string, fn Mapper) {
+func (p *Parser) MapWordPrefix(chs string, fn mapper) {
 	p.wordPrefixes.Insert(chs, fn)
 }
 
-func (p *Parser) MapCapture(chs string, fn Mapper) {
+func (p *Parser) MapCapture(chs string, fn mapper) {
 	chsToInsert := strings.Split(chs, "")
 	for i := range chsToInsert {
 		if i < len(chsToInsert)-1 {
@@ -53,7 +53,7 @@ func (p *Parser) MapCapture(chs string, fn Mapper) {
 			// string we use for searching. So we need the full path of the string to be present
 			// in the tree, but of course if it is not complete yet, we do not want to insert the
 			// actual mapper.
-			p.captures.Insert(chs[0:i+1], Mapper(noOpMapper))
+			p.captures.Insert(chs[0:i+1], mapper(noOpMapper))
 		} else {
 			p.captures.Insert(chs, fn)
 		}
@@ -61,14 +61,14 @@ func (p *Parser) MapCapture(chs string, fn Mapper) {
 }
 
 func (p Parser) Parse() string {
-	mCx := NoOpMapperCx()
-	cx := ParseCx{
-		chs:     mCx.Chs,
+	mCx := noOpMapperCx()
+	cx := parseCx{
+		chs:     mCx.chs,
 		buf:     "",
 		rest:    p.text,
-		mapper:  mCx.Mapper,
-		checker: mCx.Checker,
-		ty:      mCx.Type,
+		mapper:  mCx.mapper,
+		checker: mCx.checker,
+		ty:      mCx.ty,
 	}
 	rt := p.parse(cx)
 	return rt.parsed
@@ -105,7 +105,7 @@ func (p Parser) parseLine(line string) string {
 
 	chs := ""
 	tmp := ""
-	lastValidMapper := Mapper(nil)
+	lastValidMapper := mapper(nil)
 	var lastValidMapperIdx int
 	// Iterating over each character in the line.
 	// As long as we find a valid mapper, we replace the old one
@@ -123,7 +123,7 @@ func (p Parser) parseLine(line string) string {
 				tmp = lastValidMapper(Cx{
 					Chs:  line[0:lastValidMapperIdx],
 					Body: strings.TrimSpace(line[lastValidMapperIdx+1:]),
-				}).String()
+				})
 				lastValidMapper = nil
 			}
 			if !p.linePrefixes.isWordOfLenPossible(len(chs)) {
@@ -139,7 +139,7 @@ func (p Parser) parseLine(line string) string {
 	}
 	// fmt.Println("line", line)
 
-	var mapper Mapper
+	var mapper mapper
 	inCapture := false
 	var capture string
 	chs = ""
@@ -167,7 +167,7 @@ func (p Parser) parseLine(line string) string {
 				results = append(results, mapper(Cx{
 					Chs:  startingPattern,
 					Body: string(capture),
-				}).String())
+				}))
 				startingPattern = ""
 				mapper = nil
 				inCapture = false
@@ -187,7 +187,7 @@ func (p Parser) parseLine(line string) string {
 					results = append(results, mapper(Cx{
 						Chs:  startingPattern,
 						Body: string(capture),
-					}).String())
+					}))
 					mapper = nil
 					inCapture = false
 					capture = ""
@@ -207,15 +207,15 @@ func (p Parser) parseLine(line string) string {
 		results = append(results, noOpMapper(Cx{
 			Chs:  "",
 			Body: startingPattern + (capture),
-		}).String())
+		}))
 	}
 
 	return strings.Join(results, "")
 }
 
-func (p *Parser) parse(cx ParseCx) Rt {
+func (p *Parser) parse(cx parseCx) rt {
 	currChs := ""
-	var mCx MapperCx = NoOpMapperCx()
+	var mCx mapperCx = noOpMapperCx()
 	var nextChs string
 
 	for {
@@ -226,11 +226,11 @@ func (p *Parser) parse(cx ParseCx) Rt {
 			// that we did not find a matching closing character. Therefore we want to
 			// return the original string and apply the `noOpMapper` to it.
 			if cx.ty == Capture {
-				return Rt{
+				return rt{
 					parsed: noOpMapper(Cx{
 						Chs:  "",
 						Body: cx.buf + cx.chs,
-					}).String(),
+					}),
 					rest: cx.rest,
 				}
 			}
@@ -240,9 +240,9 @@ func (p *Parser) parse(cx ParseCx) Rt {
 			res := cx.mapper(Cx{
 				Chs:  cx.chs,
 				Body: cx.buf,
-			}).String()
+			})
 
-			return Rt{
+			return rt{
 				parsed: res,
 				rest:   cx.rest,
 			}
@@ -272,11 +272,11 @@ func (p *Parser) parse(cx ParseCx) Rt {
 			if cx.ty == Capture {
 				cx.rest = cx.rest[len(cx.chs):]
 			}
-			return Rt{
+			return rt{
 				parsed: cx.mapper(Cx{
 					Chs:  cx.chs,
 					Body: cx.buf,
-				}).String(),
+				}),
 				rest: cx.rest,
 			}
 		}
@@ -287,7 +287,7 @@ func (p *Parser) parse(cx ParseCx) Rt {
 		// We have a mapper for "*" and "**". If we are looking for "**", we will always
 		// find a mapper for "*" first. Therefore we want to continue searching for a
 		// matching opening character as long as it is necessary.
-		if fnMCx := p.ifFn(currChs); fnMCx.Type != Undefined {
+		if fnMCx := p.ifFn(currChs); fnMCx.ty != Undefined {
 			mCx = fnMCx
 			// Advancing by a single character here is important since we want to
 			// check if the next character is a valid mapper.
@@ -299,14 +299,14 @@ func (p *Parser) parse(cx ParseCx) Rt {
 		// If we found a valid mapper, we want to parse the rest of the string recursively.
 		// We do this by calling the parse function again with the rest of the string and
 		// pass in the required information to the recursive call.
-		if mCx.Type != Undefined {
-			rt := p.parse(ParseCx{
+		if mCx.ty != Undefined {
+			rt := p.parse(parseCx{
 				chs:     nextChs,
 				buf:     "",
 				rest:    cx.rest,
-				mapper:  mCx.Mapper,
-				checker: mCx.Checker,
-				ty:      mCx.Type,
+				mapper:  mCx.mapper,
+				checker: mCx.checker,
+				ty:      mCx.ty,
 			})
 			// We just exited the recursive call and therefore we need to update the
 			// current context with the parsed string and the rest of the string.
@@ -317,7 +317,7 @@ func (p *Parser) parse(cx ParseCx) Rt {
 			// since we just parsed them and we might encounter another recursive call
 			currChs = ""
 			nextChs = ""
-			mCx = NoOpMapperCx()
+			mCx = noOpMapperCx()
 		}
 
 		if len(cx.rest) != 0 {
@@ -332,20 +332,20 @@ func (p *Parser) parse(cx ParseCx) Rt {
 			continue
 		}
 
-		return Rt{
+		return rt{
 			parsed: cx.mapper(Cx{
 				Chs:  cx.chs,
 				Body: cx.buf,
-			}).String(),
+			}),
 			rest: cx.rest,
 		}
 	}
 }
 
-func (p *Parser) ifFn(chs string) MapperCx {
-	var ty MapperType = Undefined
-	var mapper Mapper = noOpMapper
-	var checker Checker = noOpChecker
+func (p *Parser) ifFn(chs string) mapperCx {
+	var ty mapperType = Undefined
+	var mapper mapper = noOpMapper
+	var checker checker = noOpChecker
 	if fn := p.linePrefixes.Find(chs); fn != nil {
 		ty = LinePrefix
 		mapper = fn
@@ -366,27 +366,27 @@ func (p *Parser) ifFn(chs string) MapperCx {
 		mapper = fn
 		checker = captureEndChecker
 	}
-	return MapperCx{
-		Chs:     chs,
-		Mapper:  mapper,
-		Checker: checker,
-		Type:    ty,
+	return mapperCx{
+		chs:     chs,
+		mapper:  mapper,
+		checker: checker,
+		ty:      ty,
 	}
 }
 
-func captureEndChecker(chs string, chsToCheck string) ContinueOrEnd {
+func captureEndChecker(chs string, chsToCheck string) continueOrEnd {
 	lnTC := len(chsToCheck)
 	lnCh := len(chs)
 
 	if lnTC == 0 || lnCh == 0 {
-		return ContinueOrEnd{
+		return continueOrEnd{
 			continueSearchingForMatchingClosingCharacters: false,
 			applyParser: false,
 		}
 	}
 
 	if lnTC > lnCh {
-		return ContinueOrEnd{
+		return continueOrEnd{
 			continueSearchingForMatchingClosingCharacters: false,
 			applyParser: false,
 		}
@@ -394,74 +394,74 @@ func captureEndChecker(chs string, chsToCheck string) ContinueOrEnd {
 
 	if chs[0:lnTC] == chsToCheck {
 		if lnTC == lnCh {
-			return ContinueOrEnd{
+			return continueOrEnd{
 				continueSearchingForMatchingClosingCharacters: false,
 				applyParser: true,
 			}
 		} else {
-			return ContinueOrEnd{
+			return continueOrEnd{
 				continueSearchingForMatchingClosingCharacters: true,
 				applyParser: false,
 			}
 		}
 	}
 
-	return ContinueOrEnd{
+	return continueOrEnd{
 		continueSearchingForMatchingClosingCharacters: false,
 		applyParser: false,
 	}
 }
 
-func lineEndChecker(_ string, chsToCheck string) ContinueOrEnd {
+func lineEndChecker(_ string, chsToCheck string) continueOrEnd {
 	if len(chsToCheck) == 0 {
-		return ContinueOrEnd{
+		return continueOrEnd{
 			continueSearchingForMatchingClosingCharacters: false,
 			applyParser: true,
 		}
 	}
 	lastChar := chsToCheck[len(chsToCheck)-1:]
 	if lastChar == "\n" || lastChar == "\r" {
-		return ContinueOrEnd{
+		return continueOrEnd{
 			continueSearchingForMatchingClosingCharacters: false,
 			applyParser: true,
 		}
 	}
-	return ContinueOrEnd{
+	return continueOrEnd{
 		continueSearchingForMatchingClosingCharacters: false,
 		applyParser: false,
 	}
 }
 
-func wordEndChecker(chs string, chsToCheck string) ContinueOrEnd {
+func wordEndChecker(chs string, chsToCheck string) continueOrEnd {
 	if len(chsToCheck) == 0 {
-		return ContinueOrEnd{
+		return continueOrEnd{
 			continueSearchingForMatchingClosingCharacters: false,
 			applyParser: true,
 		}
 	}
 	lastChar := chsToCheck[len(chsToCheck)-1:]
 	if lastChar == " " || lastChar == "\n" || lastChar == "\t" || lastChar == "\r" {
-		return ContinueOrEnd{
+		return continueOrEnd{
 			continueSearchingForMatchingClosingCharacters: false,
 			applyParser: true,
 		}
 	}
-	return ContinueOrEnd{
+	return continueOrEnd{
 		continueSearchingForMatchingClosingCharacters: false,
 		applyParser: false,
 	}
 }
 
-func noCharacterMatchChecker(chs string, chsToCheck string) ContinueOrEnd {
+func noCharacterMatchChecker(chs string, chsToCheck string) continueOrEnd {
 	if len(chsToCheck) == 0 {
-		return ContinueOrEnd{
+		return continueOrEnd{
 			continueSearchingForMatchingClosingCharacters: false,
 			applyParser: false,
 		}
 	}
 
 	if len(chs) != len(chsToCheck) {
-		return ContinueOrEnd{
+		return continueOrEnd{
 			continueSearchingForMatchingClosingCharacters: false,
 			applyParser: false,
 		}
@@ -469,14 +469,14 @@ func noCharacterMatchChecker(chs string, chsToCheck string) ContinueOrEnd {
 
 	for i, ch := range chs {
 		if byte(ch) != chsToCheck[i] {
-			return ContinueOrEnd{
+			return continueOrEnd{
 				continueSearchingForMatchingClosingCharacters: false,
 				applyParser: false,
 			}
 		}
 	}
 
-	return ContinueOrEnd{
+	return continueOrEnd{
 		continueSearchingForMatchingClosingCharacters: false,
 		applyParser: true,
 	}

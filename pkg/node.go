@@ -2,12 +2,12 @@ package snap
 
 type MapperNode struct {
 	Chars                 string
-	Fn                    Mapper
+	Fn                    mapper
 	Children              []*MapperNode
 	maxLenOfCharsThisPath int
 }
 
-func (n *MapperNode) Find(chs string) Mapper {
+func (n *MapperNode) Find(chs string) mapper {
 	if len(chs) == 0 {
 		return n.Fn
 	}
@@ -24,11 +24,11 @@ func (n *MapperNode) Find(chs string) Mapper {
 	return nil
 }
 
-func (n *MapperNode) Insert(chs string, fn Mapper) {
+func (n *MapperNode) Insert(chs string, fn mapper) {
 	n._insert(chs, fn, len(chs))
 }
 
-func (n *MapperNode) _insert(chs string, fn Mapper, originalLenOfChars int) {
+func (n *MapperNode) _insert(chs string, fn mapper, originalLenOfChars int) {
 	if n.maxLenOfCharsThisPath < originalLenOfChars {
 		n.maxLenOfCharsThisPath = originalLenOfChars
 	}
